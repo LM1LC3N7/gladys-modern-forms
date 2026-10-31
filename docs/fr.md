@@ -1,67 +1,109 @@
-# Template de démonstration
+# Modern Forms
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Intègre à Gladys les ventilateurs de plafond connectés **Modern Forms** et
+**WAC** (générations 1, 2 et 3) par leur API HTTP locale : sans compte, sans
+cloud.
+
+> Jamais testé avec un vrai appareil : construit d’après la référence WAC de
+> l’API et la bibliothèque aiomodernforms (utilisée par Home Assistant).
+> Dites-nous sur le forum comment ça se passe avec votre ventilateur. Sans lien
+> avec WAC Lighting ni Modern Forms.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Un appareil par ventilateur, nommé comme dans l’application Modern Forms,
+avec :
+
+- **Vitesse du ventilateur (0 = arrêt)** : 0 arrête le ventilateur, 1 à 6 le
+  met en marche à cette vitesse ;
+- **Sens de rotation** : avant (été) ou inverse (hiver) ;
+- **Mode brise** (ventilateurs de 3e génération) : arrêt ou brise ;
+- **Lumière** et **Intensité** (ventilateurs avec kit d’éclairage) : l’intensité
+  0 éteint la lumière, 1 à 100 % l’allume à cette intensité.
+
+Aucune n’est un interrupteur : « allumer tous les interrupteurs » ne démarre
+jamais un ventilateur. La lumière est une lumière : elle suit « éteindre les
+lumières » comme les autres.
+
+Non gérés : les minuteries, le programme, le mode absence, l’apprentissage,
+l’appairage, le redémarrage et la remise à zéro (passez par l’application), et
+les ventilateurs de **4e génération** (une autre API ; l’état dit « pas d’API
+/mf (HTTP 404) »).
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+1. Installez le ventilateur avec l’application Modern Forms ou WAC, puis
+   donnez-lui une adresse fixe dans votre box (il y apparaît comme
+   `MF_Fan_XXXXXX` ou `WAC_Fan_XXXXXX`).
+2. Dans **Adresses des ventilateurs**, saisissez l’adresse de chaque
+   ventilateur, séparées par des virgules (8 au plus), avec `:port` seulement
+   si ce n’est pas le 80.
+3. Enregistrez, puis ajoutez les ventilateurs depuis l’onglet **Découverte**.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+L’état dit quels ventilateurs ont été lus, quelle adresse ne répond pas (et
+quand elle est réessayée), une adresse où le même ventilateur a été saisi deux
+fois, un appareil qui répond sans dire quel ventilateur il est, et les arrêts
+pas encore vus appliqués.
 
-## Actions
+**Tester la connexion** lit chaque ventilateur, ou montre sa dernière lecture
+s’il a été lu il y a moins d’un intervalle (jamais plus vite que l’intervalle).
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+## Quel ventilateur un appareil pilote
 
-## Scènes
+Un appareil est lié à son ventilateur par le `clientId` que le ventilateur
+donne dans chaque réponse (son adresse MAC), pas par son adresse. Si le
+ventilateur change d’adresse, saisissez la nouvelle : l’appareil le suit.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+- Une mise en marche, une vitesse, un sens, la brise, la lumière allumée ou une
+  intensité : le ventilateur est d’abord lu, et la commande n’est écrite que si
+  cette lecture montre le ventilateur de l’appareil, à une adresse de la
+  configuration.
+- Un arrêt part vers l’adresse où le ventilateur a été lu en dernier (ou
+  gardée dans /data, ou enregistrée avec l’appareil, ou la seule adresse
+  saisie), même si rien n’a encore été lu. Il est **refusé** seulement quand :
+  - l’adresse du ventilateur n’est pas connue : jamais lu, rien de gardé,
+    aucune adresse sur l’appareil et plusieurs adresses saisies ;
+  - un autre ventilateur a répondu en dernier à cette adresse ;
+  - une commande plus récente sur la même partie (un autre arrêt) a pris sa
+    place avant son départ.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Les arrêts (vitesse 0, lumière éteinte, intensité 0)
 
-## Tableau de bord
+Un arrêt ne demande aucune option et passe en premier : il n’attend ni une
+lecture, ni une commande en cours, ni une pause après des lectures en échec,
+ni la configuration de Gladys (quand l’adresse est connue), ni la première
+lecture après un redémarrage. Il annule les commandes de la même partie encore
+en attente et coupe la requête en cours vers ce ventilateur.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+S’il ne peut pas partir tout de suite (le ventilateur ne répond pas), il est
+réessayé pendant 250 ms, puis **gardé** (dans /data, et en mémoire si /data ne
+peut pas être écrit) et envoyé dès que le ventilateur répond. Une fois parti,
+une lecture qui montre encore la partie en marche le renvoie, 3 fois au plus,
+comptées seulement quand il est vraiment parti : un arrêt qui n’est jamais
+parti n’est jamais abandonné. L’état dit où en est chaque arrêt.
 
-## Dépannage
+Un arrêt gardé prend fin quand une commande plus récente qui remet la même
+partie en marche est partie (une que le ventilateur a refusée ne compte pas),
+quand l’appareil est supprimé, ou, après qu’une lecture l’a montré appliqué,
+quand la partie est lue en marche deux fois de suite (remise en marche par la
+télécommande ou l’application : l’intégration ne l’arrête plus). Jamais par le
+temps.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Lectures et pauses
+
+Chaque ventilateur est lu à chaque intervalle (10 s par défaut, 5 s au moins),
+jamais plus tôt, même après un redémarrage ou une reconnexion (une commande
+ajoute ses propres lectures : celle d’avant, puis celles de 5 s et 20 s après). Un ventilateur
+qui ne répond pas est réessayé après 10 s, 30 s, 1, 2 puis 5 minutes (une
+minute au moins s’il demande d’attendre) ; ses commandes sont refusées entre
+temps, mais pas ses arrêts. Une commande est confirmée par l’état que répond le
+ventilateur : « envoyée, sans confirmation » sans réponse, « ne l’affiche pas
+encore » quand la réponse montre l’ancienne valeur ; le ventilateur est alors
+relu 5 s et 20 s plus tard.
+
+## Vie privée
+
+Les informations du ventilateur contiennent aussi l’e-mail du compte de
+l’application : il n’est jamais utilisé, journalisé ni gardé. /data ne garde
+que les adresses, les identifiants des ventilateurs, les heures des lectures,
+les pauses et les arrêts à envoyer.

@@ -1,61 +1,94 @@
-# Demo Devices Template
+# Modern Forms
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Brings **Modern Forms** and **WAC** smart ceiling fans (generations 1, 2 and 3)
+into Gladys through their local HTTP API: no account, no cloud.
+
+> Never tested with a real device: it was built from the WAC reference of the
+> API and the aiomodernforms library (used by Home Assistant). Tell us on the
+> forum how it goes with your fan. Not affiliated with WAC Lighting nor Modern
+> Forms.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+One device per fan, named as in the Modern Forms app, with:
+
+- **Fan speed (0 = off)**: 0 stops the fan, 1 to 6 starts it at that speed;
+- **Direction**: forward (summer) or reverse (winter);
+- **Breeze mode** (generation 3 fans): off or breeze;
+- **Light** and **Brightness** (fans with a light kit): brightness 0 turns the
+  light off, 1 to 100 % turns it on at that brightness.
+
+None of them is a switch: "turn every switch on" never starts a fan. The light
+is a light, so it follows "turn the lights off" like any other light.
+
+Not handled: the sleep timers, the schedule, the away mode, the adaptive
+learning, pairing, reboot and reset (use the app), and **generation 4** fans
+(another API; the status says "no /mf API (HTTP 404)").
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+1. Set up the fan with the Modern Forms or WAC app, then give it a fixed
+   address in your router (it shows as `MF_Fan_XXXXXX` or `WAC_Fan_XXXXXX`).
+2. In **Addresses of the fans**, type the address of each fan, separated by
+   commas (up to 8), with `:port` only if it is not 80.
+3. Save, then add the fans from the **Discovery** tab.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+The status says which fans were read, which address does not answer (and when
+it is tried again), an address where the same fan was typed twice, a device
+that answers without saying which fan it is, and the Offs not seen applied.
 
-## Actions
+**Test the connection** reads each fan, or shows its last read if it was read
+less than an interval ago (never faster than the interval).
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+## Which fan a device drives
 
-## Scenes
+A device is tied to its fan by the `clientId` the fan gives in every answer
+(the MAC address of the fan), not by its address. If the fan moves to another
+address, type the new one: the device follows it.
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+- A start, a speed, a direction, the breeze, the light on or a brightness:
+  the fan is read first, and the command is written only if that read shows
+  the fan of the device, at an address of the configuration.
+- An Off goes to the address the fan was last read at (or kept in /data, or
+  saved with the device, or the only address typed), even if nothing was read
+  yet. It is **refused** only when:
+  - the address of the fan is not known: never read, nothing kept, no address
+    on the device and several addresses typed;
+  - another fan answered last at that address;
+  - a newer command on the same part (another Off) took its place before it
+    left.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## The Offs (fan speed 0, light off, brightness 0)
 
-## Dashboard
+An Off needs no option and goes first: it does not wait for a read, a command
+in progress, a pause after failed reads, the configuration of Gladys (when the
+address is known) nor the first read after a restart. It cancels the commands
+of the same part still waiting, and cuts the request in flight to that fan.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+If it cannot be sent at once (the fan does not answer), it is tried for 250 ms,
+then **kept** (in /data, and in memory if /data cannot be written) and sent as
+soon as the fan answers. Once sent, a read that still shows the part on sends
+it again, 3 times at most, counted only when it really left: an Off that never
+left is never given up. The status tells where each Off stands.
 
-## Troubleshooting
+A kept Off ends when a newer command starting the same part has left (one the
+fan refused does not count), when the device is deleted, or, after a read
+showed it applied, when the part is read on twice in a row (started from the
+remote or the app: the integration never stops it again). Never by the time.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Reads and pauses
+
+Each fan is polled every interval (10 s by default, 5 s at least), never sooner,
+even after a restart or a reconnection (a command adds its own reads: the one
+before it, and those 5 s and 20 s after). A fan that does not answer is tried
+again after 10 s, 30 s, 1, 2 then 5 minutes (a minute at least when it asks to
+wait); its commands are refused meanwhile, but not its Offs. A command is
+confirmed by the state the fan answers: "sent, without confirmation" when no
+answer came, "does not show it yet" when the answer shows the old value; the
+fan is then read again 5 s and 20 s later.
+
+## Privacy
+
+The information the fan gives also holds the e-mail of the app account: it is
+never used, logged nor kept. /data keeps only the addresses, the ids of the
+fans, the times of the reads, the pauses and the Offs to send.

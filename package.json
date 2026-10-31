@@ -1,8 +1,8 @@
 {
-  "name": "gladys-integration-template-js",
-  "version": "1.0.0",
+  "name": "gladys-modern-forms",
+  "version": "0.1.0",
   "private": true,
-  "description": "Official starter template to build an external integration for Gladys Assistant with the JavaScript SDK.",
+  "description": "Gladys Assistant integration for Modern Forms and WAC smart ceiling fans (generations 1 to 3) through their local HTTP API.",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test"
+    "test": "node --test --test-timeout=60000"
   },
   "engines": {
     "node": ">=22"
