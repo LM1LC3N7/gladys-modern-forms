@@ -23,6 +23,12 @@ to date at the end of every milestone.
       real fan shows it; m4, `lightOn` + `lightBrightness` in one request (the
       flash of aiomodernforms issue #99: brightness first); m5, the follow-up
       reads (5 s, 20 s) not grouped: one pair per address, not per write.
+      Review r4, m-g: a fan whose answers never state the part (no `fanOn` /
+      `lightOn`, or no `clientId`) gets its Off held every ~10 s without end
+      (wanted: nothing there counts as a try, so the Off is never given up),
+      and a start from the remote is stopped again each time (no read can
+      show the Off applied); option once a real fan shows it: after N sends
+      accepted without a readable state, go back to the pace of the reads.
 - [x] **Review r2** (2026-10-31): REFUSÉ (B1: an Off held given up after 3
       sends that left); fixed: only a 2xx answer still showing the part on is
       a try, the guards of a batch tested one by one, renames in order.
@@ -31,7 +37,11 @@ to date at the end of every milestone.
       and m-e (which answers count); m-d, the probe also sends an Off the fan
       accepted but still showed on (10 s after its last send); the deadline
       test of the lane bounded to 1 s.
-- [ ] **Review** r4, then release.
+- [x] **Review r4** (2026-10-31): REFUSÉ (I7: no test that the probe sends
+      only the Offs it watches); fixed: tests I7 (an Off seen applied or given
+      up is never sent by the probe another Off keeps running) and m-h (one
+      Off per address per turn); m-g noted in "Next patch".
+- [ ] **Review** r5, then release.
 - [ ] **Milestone 2**: generation 4 (`/device` + `/fixture`, several light
       fixtures, color temperature), sleep timers, mDNS discovery
       (`_easylink._tcp`, `scanNetwork('mdns')`), Wi-Fi signal (`/config-read`).
@@ -49,6 +59,8 @@ to date at the end of every milestone.
 - That `clientId` is the station MAC on generation 3 (WAC reference, note on
   the MAC addresses in AP mode).
 - A fan without light kit: no `lightOn` in its state (as the mock fan does).
+- That every answer carries `clientId` and the fields of both parts (else an
+  Off held is sent every ~10 s without end: review r4, m-g, "Next patch").
 
 ## Decisions
 
