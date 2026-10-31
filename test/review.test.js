@@ -405,7 +405,7 @@ test('a resend refused (503) is sent again by the probe within 10 s, not at the 
   // A read a read interval after the Off contradicts it: resent, and that resend is refused with 503.
   let refuse = true;
   f.statusFor = (r) => (r.body.fanOn === false && refuse ? ((refuse = false), 503) : undefined);
-  await t.wait(121 * SECOND);
+  for (let i = 0; i < 200 && refuse; i += 1) await t.wait(SECOND);
   assert.equal(refuse, false, 'the resend was refused');
   assert.equal(f.state.fanOn, true);
   await t.wait(11 * SECOND);

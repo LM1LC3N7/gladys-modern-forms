@@ -77,12 +77,15 @@ test('a job not started by its deadline leaves the queue at once (nothing sent)'
     });
   const client = new FanClient({ host: '127.0.0.1', port: 1, transport });
   const busy = client.readState(PRIORITY.CONFIRM);
+  // Released after 2 s whatever happens: a regression fails fast instead of waiting.
+  const guard = setTimeout(() => release(), 2000);
   const started = performance.now();
   await assert.rejects(
     client.readState(PRIORITY.CONFIRM, { deadline: performance.now() + 100 }),
     (err) => err.code === 'late',
   );
   assert.ok(performance.now() - started < 1000);
+  clearTimeout(guard);
   release();
   await busy;
 });

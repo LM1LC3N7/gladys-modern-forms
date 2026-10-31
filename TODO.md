@@ -76,10 +76,14 @@ to date at the end of every milestone.
 - **Probe of the Offs held**: an Off that never left, or whose last send was
   refused (429, 5xx) or got no answer, is sent again every 10 s whatever the
   pause of the reads (one per address, the others of that address right behind
-  its answer); the first send that ever leaves is no resend (`left`, in /data).
+  its answer), never given up: a refusal, a cut or no answer is no try; a
+  resend counts only when the fan accepted it (2xx) and its answer still shows
+  the part on (review r2, B1); the first send that ever leaves is no resend
+  (`left`, in /data).
 - **Only the reads judge an Off**, each on its own field (the answer of a write,
   of the other part or of a command, never does: review r1, I4, 3 resends
-  burnt in 114 ms); one resend per read interval at most.
+  burnt in 114 ms); one resend per read interval at most, the gate capped at
+  10 s (review r2, m-a).
 - **A scene on one fan**: the commands waiting that one read serves (they came
   before it left) are written together, each field once (the same value asked
   twice is one field), so 5 functions on a fan answering in 900 ms take one

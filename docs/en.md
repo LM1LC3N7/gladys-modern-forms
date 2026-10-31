@@ -70,10 +70,11 @@ of the same part still waiting, and cuts the request in flight to that fan.
 If it cannot be sent at once (the fan does not answer), it is tried for 250 ms,
 then **kept** (in /data, and in memory if /data cannot be written) and tried
 again every 10 s, whatever the pause of the reads: it leaves within about 10 s
-of the fan answering again (also after a 429 or 503 answer, or a send left
-without answer). Once it was answered, a read that still shows the part on
-sends it again, at most once per read interval and 3 times at most, counted
-only when it really left: an Off that never left is never given up. Only the
+of the fan answering again, and again after a 429 or 503 answer, a cut or a
+send left without answer, without end: none of these is a try. Once the fan
+accepted it, a read that still shows the part on sends it again, at most once
+per read interval (10 s at most) and 3 times at most; a try counts only when
+the fan accepted the Off and its answer still shows the part on. Only the
 reads judge an Off, each on its own part (the answer of the Off of the light
 never sends the Off of the fan again). The status tells where each Off stands.
 

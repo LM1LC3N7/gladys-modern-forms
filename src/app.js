@@ -811,6 +811,8 @@ export class App {
       const changed = !guard.confirmed || guard.other !== undefined;
       guard.confirmed = true;
       guard.other = undefined;
+      // Seen applied: nothing left for the probe (a lost answer no longer matters).
+      guard.unanswered = false;
       if (!stale || at > stale.sentAt + TIMINGS.requestTimeout) guard.stale = undefined;
       if (changed) this.saveSoon();
       return;
@@ -834,17 +836,20 @@ export class App {
       this.saveSoon();
       return;
     }
-    // One resend per read interval at most: never a burst of the 3 within a few reads.
-    if (guard.resends < TIMINGS.resendMax && this.monotonic() - guard.sentAt >= this.interval) {
+    // One resend per read interval (10 s at most) : never a burst of the 3 within a few reads.
+    if (
+      guard.resends < TIMINGS.resendMax &&
+      this.monotonic() - guard.sentAt >= Math.min(this.interval, TIMINGS.guardProbe)
+    ) {
       this.resendGuard(guard);
     }
   }
 
   /** An Off held that never left, or whose last send got no answer: the probe sends it. */
   pending(guard) {
-    return (
-      !guard.confirmed && (!guard.left || (guard.unanswered && guard.resends < TIMINGS.resendMax))
-    );
+    // Never given up: a refusal, a cut or no answer is no try (only an answer still showing the
+    // part on counts, see resendGuard).
+    return !guard.confirmed && (!guard.left || guard.unanswered);
   }
 
   /**
@@ -894,6 +899,7 @@ export class App {
     const key = guard.address;
     let again = false;
     let at;
+    let resend = false;
     this.laneOf(key)
       .write(offBody(guard.part), priority, {
         deadline,
@@ -902,8 +908,8 @@ export class App {
           if (this.provenOther(key, guard.id)) throw new FanError('late', 'another fan');
         },
         onSent: () => {
-          // Counted once it has left; the first send that ever left is not a resend.
-          if (guard.left) guard.resends += 1;
+          // A resend when it left before; counted only once the fan answered it (below).
+          resend = guard.left;
           guard.left = true;
           at = this.monotonic();
           guard.sentAt = at;
@@ -917,6 +923,9 @@ export class App {
         if (state.id === guard.id && partOn(state, guard.part) === false) {
           guard.confirmed = true;
           guard.other = undefined;
+        } else if (resend && state.id === guard.id && partOn(state, guard.part) === true) {
+          // Accepted by the fan and still on: a try without effect, counted (3 at most).
+          guard.resends += 1;
         }
         // The fan answers again: the other Offs held for it go now.
         for (const other of this.guards.values()) {
@@ -927,7 +936,7 @@ export class App {
       })
       .catch((err) => {
         if (err instanceof FanError && err.sent) {
-          // A refusal (429, 5xx) or no answer: the probe sends it again.
+          // A refusal (429, 5xx), a cut or no answer: no try; the probe sends it again.
           guard.unanswered = true;
         }
         again = err instanceof FanError && err.code === 'cut' && !err.sent;
@@ -1143,7 +1152,20 @@ export class App {
       json = await this.laneOf(link.key).write(body, PRIORITY.COMMAND, {
         deadline: job.received + TIMINGS.commandAnswerBy,
         beforeSend: () => {
-          for (const j of batch) this.checkBeforeSend(j, link);
+          // Each command of the batch checked again; when only some are refused now (an Off of
+          // their part clicked meanwhile), the batch is formed again without them.
+          const refused = [];
+          for (const j of batch) {
+            try {
+              this.checkBeforeSend(j, link);
+            } catch (err) {
+              refused.push([j, err]);
+            }
+          }
+          if (refused.length === batch.length) throw refused[0][1];
+          if (refused.length > 0) {
+            throw Object.assign(new FanError('late', 'batch changed'), { refused });
+          }
           if (this.provenOther(link.key, job.id)) throw this.refusal(ERRORS.otherFan(link.key));
           if (!validBody(body)) throw this.refusal(ERRORS.badValue);
         },
@@ -1162,6 +1184,18 @@ export class App {
         },
       });
     } catch (err) {
+      if (err?.refused && !left) {
+        // Nothing left: the commands refused now get their own reason, the others go again.
+        const refused = new Map(err.refused);
+        for (const [j, reason] of refused) if (j !== job) j.reject(reason);
+        const kept = batch.filter((j) => !refused.has(j));
+        if (refused.has(job)) {
+          link.commands.unshift(...kept);
+          throw refused.get(job);
+        }
+        link.commands.unshift(...kept.slice(1));
+        return this.command(link, job);
+      }
       const answered =
         err instanceof FanError && ['busy', 'http', 'bad_response', 'size'].includes(err.code);
       for (const { gk, guard, record } of starting) {

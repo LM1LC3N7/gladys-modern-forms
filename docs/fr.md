@@ -81,12 +81,13 @@ en attente et coupe la requête en cours vers ce ventilateur.
 S’il ne peut pas partir tout de suite (le ventilateur ne répond pas), il est
 réessayé pendant 250 ms, puis **gardé** (dans /data, et en mémoire si /data ne
 peut pas être écrit) et réessayé toutes les 10 s, quelle que soit la pause des
-lectures : il part dans les 10 s environ après le retour du ventilateur (aussi
-après une réponse 429 ou 503, ou un envoi parti sans réponse). Une fois qu’il a
-eu une réponse, une lecture qui montre encore la partie en marche le renvoie,
-une fois par intervalle de lecture au plus et 3 fois au plus, comptées
-seulement quand il est vraiment parti : un arrêt qui n’est jamais parti n’est
-jamais abandonné. Seules les lectures jugent un arrêt, chacun sur sa partie (la
+lectures : il part dans les 10 s environ après le retour du ventilateur, et de
+nouveau après une réponse 429 ou 503, une coupure ou un envoi resté sans
+réponse, sans fin : rien de cela n’est un essai. Une fois que le ventilateur
+l’a accepté, une lecture qui montre encore la partie en marche le renvoie, une
+fois par intervalle de lecture au plus (10 s au plus) et 3 fois au plus ; un
+essai ne compte que si le ventilateur a accepté l’arrêt et que sa réponse
+montre encore la partie en marche. Seules les lectures jugent un arrêt, chacun sur sa partie (la
 réponse de l’arrêt de la lumière ne renvoie jamais celui du ventilateur).
 L’état dit où en est chaque arrêt.
 

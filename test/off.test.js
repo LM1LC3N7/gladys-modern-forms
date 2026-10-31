@@ -139,7 +139,7 @@ test('an Off the fan does not apply: sent again by the reads, 3 times at most, c
   const guard = t.app.guards.get(`${ID}:fan`);
   assert.equal(guard.resends, 3);
   assert.equal(guard.confirmed, false);
-  assert.match(t.status().message.en, /sent 3 more times, never seen applied; held/);
+  assert.match(t.status().message.en, /accepted 3 more times by the fan, still on; held/);
   // A new click: a new guard, sent again.
   t.world.fan().deaf = false;
   const again = await t.cmd(F(ID, 'fan-speed'), 0);

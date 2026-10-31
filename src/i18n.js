@@ -133,8 +133,8 @@ export const T = {
     ),
   guardExhausted: (name, part) =>
     both(
-      `Off of the ${part.en} of ${name}: sent 3 more times, never seen applied; held, click Off again to retry.`,
-      `Arrêt de la ${part.fr === 'ventilateur' ? 'rotation' : 'lumière'} de ${name} : renvoyé 3 fois, jamais vu appliqué ; gardé, recliquez sur Arrêt pour réessayer.`,
+      `Off of the ${part.en} of ${name}: accepted 3 more times by the fan, still on; held, click Off again to retry.`,
+      `Arrêt de la ${part.fr === 'ventilateur' ? 'rotation' : 'lumière'} de ${name} : accepté 3 fois de plus par le ventilateur, toujours en marche ; gardé, recliquez sur Arrêt pour réessayer.`,
     ),
   storeProblem: both(
     '/data could not be written: the Offs held are kept in memory only.',
