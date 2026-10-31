@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-31
+
 ### Added
 
 - Modern Forms and WAC smart ceiling fans (generations 1 to 3) through their
@@ -21,3 +23,6 @@ the notes of the version's GitHub Release.
   the first read; kept in `/data` and sent again until a read shows them.
 - "Test the connection".
 - French and English guides.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-modern-forms/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-modern-forms/releases/tag/v0.1.1

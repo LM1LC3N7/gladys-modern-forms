@@ -1,6 +1,6 @@
 {
   "name": "gladys-modern-forms",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant integration for Modern Forms and WAC smart ceiling fans (generations 1 to 3) through their local HTTP API.",
   "type": "module",
