@@ -68,24 +68,37 @@ test('connection refused: "network", nothing sent', async () => {
   await assert.rejects(client.readState(), (err) => err.code === 'network' && err.sent === false);
 });
 
-test('a job not started by its deadline leaves the queue at once (nothing sent)', async () => {
-  let release;
+test('a job not started by its deadline leaves the queue at once (nothing sent)', async (t) => {
+  const releases = [];
   const transport = (_options, { onStart }) =>
-    new Promise((resolve) => {
-      onStart?.(() => {});
-      release = () => resolve({ status: 200, body: Buffer.from(JSON.stringify(fan().state)) });
+    new Promise((resolve, reject) => {
+      onStart?.(() => reject(new FanError('cut', 'cut')));
+      releases.push(() => resolve({ status: 200, body: Buffer.from(JSON.stringify(fan().state)) }));
     });
   const client = new FanClient({ host: '127.0.0.1', port: 1, transport });
+  let timer;
+  // Whatever happens: nothing left waiting (a job kept in the queue is refused, the one running cut).
+  t.after(() => {
+    clearTimeout(timer);
+    client.close();
+    for (const release of releases) release();
+  });
   const busy = client.readState(PRIORITY.CONFIRM);
-  // Released after 2 s whatever happens: a regression fails fast instead of waiting.
-  const guard = setTimeout(() => release(), 2000);
+  busy.catch(() => {});
   const started = performance.now();
-  await assert.rejects(
-    client.readState(PRIORITY.CONFIRM, { deadline: performance.now() + 100 }),
-    (err) => err.code === 'late',
-  );
+  // Bounded: a job kept in the queue past its deadline fails here within a second, not at the
+  // timeout of the runner.
+  const outcome = await Promise.race([
+    client.readState(PRIORITY.CONFIRM, { deadline: performance.now() + 100 }).then(
+      () => 'answered',
+      (err) => err,
+    ),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, 1000, 'still waiting after 1 s');
+    }),
+  ]);
+  assert.equal(outcome?.code, 'late', String(outcome));
   assert.ok(performance.now() - started < 1000);
-  clearTimeout(guard);
-  release();
+  releases[0]();
   await busy;
 });

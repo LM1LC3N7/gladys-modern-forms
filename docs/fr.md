@@ -84,12 +84,14 @@ peut pas être écrit) et réessayé toutes les 10 s, quelle que soit la pause d
 lectures : il part dans les 10 s environ après le retour du ventilateur, et de
 nouveau après une réponse 429 ou 503, une coupure ou un envoi resté sans
 réponse, sans fin : rien de cela n’est un essai. Une fois que le ventilateur
-l’a accepté, une lecture qui montre encore la partie en marche le renvoie, une
-fois par intervalle de lecture au plus (10 s au plus) et 3 fois au plus ; un
-essai ne compte que si le ventilateur a accepté l’arrêt et que sa réponse
-montre encore la partie en marche. Seules les lectures jugent un arrêt, chacun sur sa partie (la
-réponse de l’arrêt de la lumière ne renvoie jamais celui du ventilateur).
-L’état dit où en est chaque arrêt.
+l’a accepté, une lecture qui montre encore la partie en marche le renvoie, et
+ce même tour de 10 s aussi quand aucune lecture ne l’a fait (des lectures en
+pause après une panne ne le retiennent jamais) : une fois par intervalle de
+lecture au plus (10 s au plus) et 3 fois au plus ; un essai ne compte que si le
+ventilateur a accepté l’arrêt et que sa réponse montre encore la partie en
+marche. Seules les lectures jugent un arrêt, chacun sur sa partie (la réponse
+de l’arrêt de la lumière ne renvoie jamais celui du ventilateur). L’état dit
+où en est chaque arrêt.
 
 Un arrêt gardé prend fin quand une commande plus récente qui remet la même
 partie en marche est partie (une que le ventilateur a refusée ne compte pas),

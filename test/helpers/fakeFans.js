@@ -5,7 +5,8 @@
 // `queryStaticShadowData` or a command, answered with the whole state. A fan
 // may be down (connection refused), slow (`latency`), frozen (`hang`: no
 // answer, the request times out at its deadline), answer a status, ignore the
-// commands (`deaf`), answer without `clientId`; it can be cut (onStart).
+// commands (`deaf`), answer without `clientId` or a 200 of its own
+// (`answerFor`); it can be cut (onStart).
 // Every request is recorded (`requests`, with the time it left).
 // -----------------------------------------------------------------------------
 
@@ -154,6 +155,9 @@ function respond(world, target, record) {
   if (target.status) return json({ message: 'error' }, target.status);
   const forced = target.statusFor?.(record);
   if (forced) return json({ message: 'error' }, forced);
+  // A 200 answer of its own for some requests (a state without a field, another fan), not applied.
+  const answer = target.answerFor?.(record);
+  if (answer) return json(answer);
   if (record.path !== '/mf') return json({}, 404);
   const body = record.body ?? {};
   const strip = (s) => {

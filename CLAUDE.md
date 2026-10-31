@@ -47,7 +47,8 @@ test/kit/             parts of the shared test kit (clocks, HTTP server)
 Safety rules (see TODO.md "Decisions"): Offs (fan speed 0, light 0,
 brightness 0) are protective: never refused by a pause, a queue, a read or the
 configuration not read (address known); they cut the request in flight, are
-kept in /data and sent again (3 times at most, counted when they left). Every
+kept in /data and sent again by a 10 s probe and by the reads (3 tries at
+most, a try being an answer of the fan still showing the part on). Every
 other command reads the fan first and goes only if that read shows the fan of
 the device. Success only on the state answered. One request per fan at a time.
 /data is read and written within 1.5 s or treated as unreadable / not written

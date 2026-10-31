@@ -72,11 +72,13 @@ then **kept** (in /data, and in memory if /data cannot be written) and tried
 again every 10 s, whatever the pause of the reads: it leaves within about 10 s
 of the fan answering again, and again after a 429 or 503 answer, a cut or a
 send left without answer, without end: none of these is a try. Once the fan
-accepted it, a read that still shows the part on sends it again, at most once
-per read interval (10 s at most) and 3 times at most; a try counts only when
-the fan accepted the Off and its answer still shows the part on. Only the
-reads judge an Off, each on its own part (the answer of the Off of the light
-never sends the Off of the fan again). The status tells where each Off stands.
+accepted it, a read that still shows the part on sends it again, and so does
+the same 10 s turn when no read did (reads paused by an outage never hold it):
+at most once per read interval (10 s at most) and 3 times at most; a try
+counts only when the fan accepted the Off and its answer still shows the part
+on. Only the reads judge an Off, each on its own part (the answer of the Off of
+the light never sends the Off of the fan again). The status tells where each
+Off stands.
 
 A kept Off ends when a newer command starting the same part has left (one the
 fan refused does not count), when the device is deleted, or, after a read

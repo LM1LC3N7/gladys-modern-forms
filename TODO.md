@@ -23,7 +23,15 @@ to date at the end of every milestone.
       real fan shows it; m4, `lightOn` + `lightBrightness` in one request (the
       flash of aiomodernforms issue #99: brightness first); m5, the follow-up
       reads (5 s, 20 s) not grouped: one pair per address, not per write.
-- [ ] **Review** r2 (high), then release.
+- [x] **Review r2** (2026-10-31): REFUSÉ (B1: an Off held given up after 3
+      sends that left); fixed: only a 2xx answer still showing the part on is
+      a try, the guards of a batch tested one by one, renames in order.
+- [x] **Review r3** (2026-10-31): REFUSÉ (I6: the commands of a batch queued
+      again after an Off refused some of them had no test); fixed: tests I6
+      and m-e (which answers count); m-d, the probe also sends an Off the fan
+      accepted but still showed on (10 s after its last send); the deadline
+      test of the lane bounded to 1 s.
+- [ ] **Review** r4, then release.
 - [ ] **Milestone 2**: generation 4 (`/device` + `/fixture`, several light
       fixtures, color temperature), sleep timers, mDNS discovery
       (`_easylink._tcp`, `scanNetwork('mdns')`), Wi-Fi signal (`/config-read`).
@@ -79,7 +87,11 @@ to date at the end of every milestone.
   its answer), never given up: a refusal, a cut or no answer is no try; a
   resend counts only when the fan accepted it (2xx) and its answer still shows
   the part on (review r2, B1); the first send that ever leaves is no resend
-  (`left`, in /data).
+  (`left`, in /data). An Off the fan accepted but still showed on, not given
+  up, is sent by the probe too once 10 s passed since its last send: an
+  outage after it never makes it wait for the reads paused up to 5 min
+  (review r3, m-d); with the gate of the reads, never two sends within a read
+  interval (10 s at most).
 - **Only the reads judge an Off**, each on its own field (the answer of a write,
   of the other part or of a command, never does: review r1, I4, 3 resends
   burnt in 114 ms); one resend per read interval at most, the gate capped at
@@ -97,9 +109,10 @@ to date at the end of every milestone.
   the queue (they cancel the commands of the same part waiting and stop one
   taken from the queue before its first byte), a read in flight (cut), the
   configuration not read, /data (saved without waiting). Tried for 250 ms,
-  then kept and sent as soon as the lane is free; resent by the reads that
-  contradict them, 3 times at most, counted when they left (a try that never
-  left is no try, an unreadable count is 0, no age limit). Confirmed by a
+  then kept and sent as soon as the lane is free; resent by the probe and by
+  the reads that contradict them, 3 tries at most, a try being a 2xx answer
+  still showing the part on (a refusal, a cut, no answer or a send that never
+  left is no try; an unreadable count is 0; no age limit). Confirmed by a
   read (or their own answer) showing the part off. Lifted by a newer command
   starting the same part that left (not a 4xx / 429 answer), another Off, the
   device deleted, or once confirmed by the part read on twice in a row

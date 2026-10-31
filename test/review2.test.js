@@ -113,7 +113,7 @@ test('probe: one Off per address per turn, the other Off of that fan right behin
   t.app.stop();
 });
 
-test('probe: an answer clears "unanswered" (no probe send once the fan answered)', async () => {
+test('probe: an answer clears "unanswered" (no probe send within 10 s of an answered one)', async () => {
   const t = await setup();
   const f = t.world.fan();
   f.state.fanOn = true;
@@ -129,7 +129,7 @@ test('probe: an answer clears "unanswered" (no probe send once the fan answered)
   assert.equal(guard.unanswered, false);
   const sends = offWrites(t).length;
   await t.wait(9 * SECOND);
-  assert.equal(offWrites(t).length, sends, 'no probe send after an answer');
+  assert.equal(offWrites(t).length, sends, 'no probe send within 10 s of an answer');
   t.app.stop();
 });
 

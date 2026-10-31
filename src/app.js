@@ -20,8 +20,10 @@
 // they cancel the commands of the same part still waiting (and stop one
 // taken from the queue right before its first byte), cut the request in
 // flight to that fan but another Off, are tried again for 250 ms, then kept
-// (a guard, in /data) and sent again as soon as the lane is free and by the
-// reads that contradict them (3 times at most, counted only when they left).
+// (a guard, in /data) and sent again as soon as the lane is free, by a probe
+// every 10 s whatever the pause of the reads, and by the reads that contradict
+// them (3 tries at most, a try being a 2xx answer still showing the part on;
+// a refusal, a cut or no answer is no try).
 // A guard is lifted by a later command that starts the same part and left
 // (not one the fan refused), by another Off, by the device deleted, or once
 // a read showed it applied, by the part read on twice in a row (the remote,
@@ -843,6 +845,7 @@ export class App {
     ) {
       this.resendGuard(guard);
     }
+    this.armProbe();
   }
 
   /** An Off held that never left, or whose last send got no answer: the probe sends it. */
@@ -853,13 +856,25 @@ export class App {
   }
 
   /**
-   * The probe of the Offs held not yet answered: every TIMINGS.guardProbe, whatever the pause
-   * of the reads, one Off per address (the others of that address right behind its answer).
+   * An Off held the probe watches: pending, or accepted by the fan but not seen applied and not
+   * given up (fewer than 3 answers still on). Without it, such an Off waited for the reads, paused
+   * up to 5 min after an outage (review r3, m-d).
+   */
+  watched(guard) {
+    return this.pending(guard) || (!guard.confirmed && guard.resends < TIMINGS.resendMax);
+  }
+
+  /**
+   * The probe of the Offs held not yet seen applied: every TIMINGS.guardProbe, whatever the pause
+   * of the reads, one Off per address (the others of that address right behind its answer). An
+   * Off pending goes at every turn; one the fan accepted but still showed on, once
+   * TIMINGS.guardProbe passed since its last send (with the gate of the reads: one send per
+   * read interval at most, 10 s at most).
    * An Off waits no read after its fan comes back.
    */
   armProbe() {
     if (this.probeTimer !== undefined || this.stopped) return;
-    if (![...this.guards.values()].some((g) => this.pending(g))) return;
+    if (![...this.guards.values()].some((g) => this.watched(g))) return;
     this.probeTimer = this.timers.setTimeout(() => {
       this.probeTimer = undefined;
       this.probe();
@@ -868,8 +883,12 @@ export class App {
 
   probe() {
     const sent = new Set();
+    const mono = this.monotonic();
     for (const guard of this.guards.values()) {
-      if (!this.pending(guard) || guard.inFlight || sent.has(guard.address)) continue;
+      if (guard.inFlight || sent.has(guard.address)) continue;
+      const due =
+        this.pending(guard) || (this.watched(guard) && mono - guard.sentAt >= TIMINGS.guardProbe);
+      if (!due) continue;
       sent.add(guard.address);
       this.resendGuard(guard);
     }
@@ -1204,6 +1223,7 @@ export class App {
           // Refused by the fan: not a newer command, the Off stands.
           this.guards.set(gk, guard);
           this.saveSoon();
+          this.armProbe();
         }
       }
       if (err instanceof FanError && err.code === 'busy') this.failed(link.key, err);
@@ -1365,6 +1385,8 @@ export class App {
       guard.confirmed = true;
       guard.other = undefined;
     }
+    // Accepted but not shown applied: the probe watches it (an outage may pause the reads).
+    this.armProbe();
     this.saveSoon();
     this.refreshStatus().catch(() => {});
     if (off) return undefined;
