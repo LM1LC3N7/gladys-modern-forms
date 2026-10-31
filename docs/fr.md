@@ -63,7 +63,10 @@ ventilateur change d’adresse, saisissez la nouvelle : l’appareil le suit.
   saisie), même si rien n’a encore été lu. Il est **refusé** seulement quand :
   - l’adresse du ventilateur n’est pas connue : jamais lu, rien de gardé,
     aucune adresse sur l’appareil et plusieurs adresses saisies ;
-  - un autre ventilateur a répondu en dernier à cette adresse ;
+  - un autre ventilateur a répondu en dernier à cette adresse. Tant qu’aucune
+    lecture ne l’a montré, un ventilateur échangé avec un autre à la même
+    adresse n’est pas vu : un arrêt envoyé alors peut arrêter l’autre
+    ventilateur (sa réponse le dit, et rien n’est gardé) ;
   - une commande plus récente sur la même partie (un autre arrêt) a pris sa
     place avant son départ.
 
@@ -77,10 +80,15 @@ en attente et coupe la requête en cours vers ce ventilateur.
 
 S’il ne peut pas partir tout de suite (le ventilateur ne répond pas), il est
 réessayé pendant 250 ms, puis **gardé** (dans /data, et en mémoire si /data ne
-peut pas être écrit) et envoyé dès que le ventilateur répond. Une fois parti,
-une lecture qui montre encore la partie en marche le renvoie, 3 fois au plus,
-comptées seulement quand il est vraiment parti : un arrêt qui n’est jamais
-parti n’est jamais abandonné. L’état dit où en est chaque arrêt.
+peut pas être écrit) et réessayé toutes les 10 s, quelle que soit la pause des
+lectures : il part dans les 10 s environ après le retour du ventilateur (aussi
+après une réponse 429 ou 503, ou un envoi parti sans réponse). Une fois qu’il a
+eu une réponse, une lecture qui montre encore la partie en marche le renvoie,
+une fois par intervalle de lecture au plus et 3 fois au plus, comptées
+seulement quand il est vraiment parti : un arrêt qui n’est jamais parti n’est
+jamais abandonné. Seules les lectures jugent un arrêt, chacun sur sa partie (la
+réponse de l’arrêt de la lumière ne renvoie jamais celui du ventilateur).
+L’état dit où en est chaque arrêt.
 
 Un arrêt gardé prend fin quand une commande plus récente qui remet la même
 partie en marche est partie (une que le ventilateur a refusée ne compte pas),
@@ -97,7 +105,8 @@ ajoute ses propres lectures : celle d’avant, puis celles de 5 s et 20 s après
 qui ne répond pas est réessayé après 10 s, 30 s, 1, 2 puis 5 minutes (une
 minute au moins s’il demande d’attendre) ; ses commandes sont refusées entre
 temps, mais pas ses arrêts. Une commande est confirmée par l’état que répond le
-ventilateur : « envoyée, sans confirmation » sans réponse, « ne l’affiche pas
+ventilateur (les commandes d’une scène sur un même ventilateur partent ensemble :
+une lecture, une écriture) : « envoyée, sans confirmation » sans réponse, « ne l’affiche pas
 encore » quand la réponse montre l’ancienne valeur ; le ventilateur est alors
 relu 5 s et 20 s plus tard.
 

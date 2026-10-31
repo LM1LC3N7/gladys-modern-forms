@@ -54,7 +54,9 @@ address, type the new one: the device follows it.
   yet. It is **refused** only when:
   - the address of the fan is not known: never read, nothing kept, no address
     on the device and several addresses typed;
-  - another fan answered last at that address;
+  - another fan answered last at that address. Until a read shows it, a fan
+    swapped with another one at the same address is not seen: an Off sent
+    then may stop the other fan (its answer says so, and nothing is kept);
   - a newer command on the same part (another Off) took its place before it
     left.
 
@@ -66,10 +68,14 @@ address is known) nor the first read after a restart. It cancels the commands
 of the same part still waiting, and cuts the request in flight to that fan.
 
 If it cannot be sent at once (the fan does not answer), it is tried for 250 ms,
-then **kept** (in /data, and in memory if /data cannot be written) and sent as
-soon as the fan answers. Once sent, a read that still shows the part on sends
-it again, 3 times at most, counted only when it really left: an Off that never
-left is never given up. The status tells where each Off stands.
+then **kept** (in /data, and in memory if /data cannot be written) and tried
+again every 10 s, whatever the pause of the reads: it leaves within about 10 s
+of the fan answering again (also after a 429 or 503 answer, or a send left
+without answer). Once it was answered, a read that still shows the part on
+sends it again, at most once per read interval and 3 times at most, counted
+only when it really left: an Off that never left is never given up. Only the
+reads judge an Off, each on its own part (the answer of the Off of the light
+never sends the Off of the fan again). The status tells where each Off stands.
 
 A kept Off ends when a newer command starting the same part has left (one the
 fan refused does not count), when the device is deleted, or, after a read
@@ -83,7 +89,8 @@ even after a restart or a reconnection (a command adds its own reads: the one
 before it, and those 5 s and 20 s after). A fan that does not answer is tried
 again after 10 s, 30 s, 1, 2 then 5 minutes (a minute at least when it asks to
 wait); its commands are refused meanwhile, but not its Offs. A command is
-confirmed by the state the fan answers: "sent, without confirmation" when no
+confirmed by the state the fan answers (the commands of a scene on one fan go
+together: one read, one write): "sent, without confirmation" when no
 answer came, "does not show it yet" when the answer shows the old value; the
 fan is then read again 5 s and 20 s later.
 

@@ -82,18 +82,26 @@ export class FanClient {
         priority === PRIORITY.PROTECTIVE &&
         this.current?.priority === PRIORITY.PROTECTIVE
       ) {
-        // Another Off that gets no answer for 1 s is cut too (it may have left: "sent, without
-        // confirmation"); this one does not wait for its deadline.
-        const running = this.current;
-        this.timers.setTimeout(
-          () => {
-            if (this.current === running) running.cut?.();
-          },
-          Math.max(0, running.startedAt + TIMINGS.stuckProtective - this.monotonic()),
-        );
+        this.armStuck(this.current);
       }
       this.pump();
     });
+  }
+
+  /**
+   * An Off running while another Off waits: cut once it got no answer for 1 s (it may have left:
+   * "sent, without confirmation"), so that the next one does not wait for its deadline. Armed
+   * on the request running, when it starts or when an Off comes behind it.
+   */
+  armStuck(running) {
+    if (running.stuckArmed) return;
+    running.stuckArmed = true;
+    this.timers.setTimeout(
+      () => {
+        if (this.current === running) running.cut?.();
+      },
+      Math.max(0, running.startedAt + TIMINGS.stuckProtective - this.monotonic()),
+    );
   }
 
   pump() {
@@ -108,6 +116,12 @@ export class FanClient {
       running.cutAsked = true;
     };
     this.current = running;
+    if (
+      job.priority === PRIORITY.PROTECTIVE &&
+      this.queue.some((j) => j.priority === PRIORITY.PROTECTIVE)
+    ) {
+      this.armStuck(running);
+    }
     const { deadline, beforeSend, onSent } = job.hooks;
     this.transport(
       { hostname: this.host, port: this.port, ...job.options },

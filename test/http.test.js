@@ -67,3 +67,22 @@ test('connection refused: "network", nothing sent', async () => {
   const client = new FanClient({ host: '127.0.0.1', port: 1 });
   await assert.rejects(client.readState(), (err) => err.code === 'network' && err.sent === false);
 });
+
+test('a job not started by its deadline leaves the queue at once (nothing sent)', async () => {
+  let release;
+  const transport = (_options, { onStart }) =>
+    new Promise((resolve) => {
+      onStart?.(() => {});
+      release = () => resolve({ status: 200, body: Buffer.from(JSON.stringify(fan().state)) });
+    });
+  const client = new FanClient({ host: '127.0.0.1', port: 1, transport });
+  const busy = client.readState(PRIORITY.CONFIRM);
+  const started = performance.now();
+  await assert.rejects(
+    client.readState(PRIORITY.CONFIRM, { deadline: performance.now() + 100 }),
+    (err) => err.code === 'late',
+  );
+  assert.ok(performance.now() - started < 1000);
+  release();
+  await busy;
+});

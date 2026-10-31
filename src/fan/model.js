@@ -163,12 +163,14 @@ export function commandOf(key, value) {
 
 /**
  * The last check of a body right before it is written: only the fields and values the
- * WAC reference takes (fan speed 1-6, brightness 1-100). false: never written.
+ * WAC reference takes (fan speed 1-6, brightness 1-100), 6 fields at most. false: never
+ * written.
  */
 export function validBody(body) {
   if (!body || typeof body !== 'object') return false;
   const entries = Object.entries(body);
-  if (entries.length === 0 || entries.length > 2) return false;
+  // One command is 1 or 2 fields; the commands of a scene written together, each field once.
+  if (entries.length === 0 || entries.length > 6) return false;
   return entries.every(([key, value]) => {
     switch (key) {
       case 'fanOn':

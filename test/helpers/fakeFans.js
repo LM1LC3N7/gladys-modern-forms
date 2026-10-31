@@ -116,7 +116,8 @@ async function transport(world, options, { monotonic, deadline, beforeSend, onSe
   onStart?.(() => cut());
   try {
     const target = world.fans[address];
-    await Promise.race([world.sleep(1), cutPromise]);
+    const connect = typeof target?.connectDelay === 'function' ? target.connectDelay(record) : 1;
+    await Promise.race([world.sleep(connect || 1), cutPromise]);
     if (deadline !== undefined && monotonic() >= deadline) {
       throw new FanError('late', 'no time left to send');
     }
@@ -151,6 +152,8 @@ function respond(world, target, record) {
   if (typeof next === 'function') next = next(record);
   if (next) return next.raw ?? json(next.json ?? {}, next.status ?? 200);
   if (target.status) return json({ message: 'error' }, target.status);
+  const forced = target.statusFor?.(record);
+  if (forced) return json({ message: 'error' }, forced);
   if (record.path !== '/mf') return json({}, 404);
   const body = record.body ?? {};
   const strip = (s) => {

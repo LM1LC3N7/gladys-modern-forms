@@ -121,6 +121,11 @@ export const TIMINGS = {
   cutWait: 500,
   /** Reads after a command: its effect, then a check. */
   followUps: [5 * SECOND, 20 * SECOND],
+  /**
+   * An Off held that never left (or whose last send got no answer) is sent again this often,
+   * whatever the pause of the reads: it leaves within this once the fan answers again.
+   */
+  guardProbe: 10 * SECOND,
   /** An Off the reads contradict is sent again this many times at most (counted when sent). */
   resendMax: 3,
   /** The configuration of Gladys not read: new tries 5 s, 15 s, then every minute. */

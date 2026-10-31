@@ -466,12 +466,14 @@ test('an answer to a request that left before the last send of a guard never jud
   await t.start();
   const { parseState } = await import('../src/fan/model.js');
   const key = '192.168.1.99:80';
-  const guard = t.app.makeGuard({ id: ID, part: 'fan', address: key });
+  const guard = t.app.makeGuard({ id: ID, part: 'fan', address: key, confirmed: true });
   guard.sentAt = 1e12;
   t.app.guards.set(`${ID}:fan`, guard);
-  t.app.applyAnswer(key, parseState({ ...t.world.fan().state, fanOn: true }), 1e12 - 1);
-  assert.equal(guard.resends, 0);
-  assert.equal(guard.inFlight, false, 'not sent again');
+  const on = parseState({ ...t.world.fan().state, fanOn: true });
+  t.app.applyAnswer(key, on, 1e12 - 2, { judge: true });
+  t.app.applyAnswer(key, on, 1e12 - 1, { judge: true });
+  assert.equal(t.app.guards.get(`${ID}:fan`), guard, 'two older reads on never lift it');
+  assert.equal(guard.other, undefined);
   t.app.stop();
 });
 
@@ -483,5 +485,92 @@ test('a device deleted without Off held still refreshes Discover and the status'
   t.app.published = 'stale';
   await t.app.deviceDeleted(t.gladys.devices[0]);
   assert.ok(posts() > before);
+  t.app.stop();
+});
+
+// --- Review r1 -----------------------------------------------------------------------
+
+test('I1: an Off held through a 12 min outage leaves within 15 s of the fan answering again', async () => {
+  const t = await setup();
+  t.world.fan().state.fanOn = true;
+  await t.start();
+  t.world.fan().down = true;
+  await t.wait(2 * MINUTE); // the reads now pause 1, 2 then 5 min
+  const ack = await t.cmd(F(ID, 'fan-speed'), 0);
+  assert.match(ack.error, /gardé/);
+  await t.wait(10 * MINUTE);
+  assert.equal(t.world.fan().state.fanOn, true);
+  t.world.fan().down = false;
+  const back = t.clock.elapsed;
+  await t.wait(15 * SECOND);
+  const sent = offs(t)[0];
+  assert.ok(sent, 'the Off left');
+  assert.ok(sent.sentAt - back <= 15 * SECOND, `${sent.sentAt - back} ms after the fan came back`);
+  assert.equal(t.world.fan().state.fanOn, false);
+  assert.equal(t.app.guards.get(`${ID}:fan`).resends, 0, 'its first send is no resend');
+  t.app.stop();
+});
+
+test('I1: an Off refused with 503 is sent again by the probe, not after the minute of the reads', async () => {
+  const t = await setup();
+  t.world.fan().state.lightOn = true;
+  await t.start();
+  t.world.queue.push(() => ({ status: 503 }));
+  const ack = await t.cmd(F(ID, 'light'), 0);
+  assert.equal(ack.success, false);
+  await t.wait(11 * SECOND);
+  assert.equal(t.world.fan().state.lightOn, false);
+  t.app.stop();
+});
+
+test('I4: fan Off and light Off of one scene on a deaf fan: each judged on its own field, both applied', async () => {
+  const t = await setup();
+  const f = t.world.fan();
+  f.state.fanOn = true;
+  f.state.lightOn = true;
+  await t.start();
+  f.deaf = true;
+  const device = t.gladys.devices[0];
+  const acks = await t.act(
+    Promise.all([
+      t.gladys.fake.setValue(device, { external_id: F(ID, 'fan-speed') }, 0),
+      t.gladys.fake.setValue(device, { external_id: F(ID, 'light') }, 0),
+    ]),
+  );
+  assert.ok(acks.every((a) => !a.success));
+  await t.wait(1 * SECOND);
+  assert.equal(t.world.writes().length, 2, 'no resend burst from the answers of the writes');
+  await t.wait(5 * SECOND);
+  f.deaf = false;
+  await t.wait(30 * SECOND);
+  assert.equal(f.state.fanOn, false);
+  assert.equal(f.state.lightOn, false);
+  // Spread: never two resends of one guard within a read interval.
+  for (const field of ['fanOn', 'lightOn']) {
+    const at = offs(t, field).map((r) => r.sentAt);
+    for (let i = 1; i < at.length; i += 1)
+      assert.ok(at[i] - at[i - 1] >= 9 * SECOND, `${field} ${at}`);
+  }
+  t.app.stop();
+});
+
+test('m6: duplicate Offs behind a frozen one: each frozen Off is cut at 1 s, the last one leaves in time', async () => {
+  const t = await setup();
+  await t.start();
+  const f = t.world.fan();
+  f.state.fanOn = true;
+  let frozen = 2;
+  f.latency = (r) =>
+    (r.body.fanOn === false || r.body.lightOn === false) && frozen-- > 0 ? 60 * SECOND : 20;
+  const device = t.gladys.devices[0];
+  const one = t.gladys.fake.setValue(device, { external_id: F(ID, 'fan-speed') }, 0);
+  await t.wait(10);
+  const two = t.gladys.fake.setValue(device, { external_id: F(ID, 'light') }, 0);
+  await t.wait(10);
+  const three = t.gladys.fake.setValue(device, { external_id: F(ID, 'fan-speed') }, 0);
+  const started = t.clock.elapsed;
+  const acks = await t.act(Promise.all([one, two, three]));
+  assert.equal(acks[2].success, true, acks[2].error);
+  assert.ok(t.clock.elapsed - started < 3 * SECOND);
   t.app.stop();
 });

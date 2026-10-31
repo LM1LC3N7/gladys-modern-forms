@@ -425,3 +425,38 @@ test('a write answered without the field asked: "sent, without confirmation", ne
   assert.match(ack.error, /sans confirmation/);
   t.app.stop();
 });
+
+test('I3: a scene of 5 functions on one slow fan (900 ms): one read, one write, all applied within the 5 s of Gladys', async () => {
+  const t = await setup();
+  await t.start();
+  const f = t.world.fan();
+  f.latency = 900;
+  const started = t.clock.elapsed;
+  const device = t.gladys.devices[0];
+  const set = (key, value) => t.gladys.fake.setValue(device, { external_id: F(ID, key) }, value);
+  t.world.requests.length = 0;
+  const acks = await t.act(
+    Promise.all([
+      set('fan-speed', 4),
+      set('direction', 1),
+      set('wind', 2),
+      set('light', 1),
+      set('brightness', 30),
+    ]),
+  );
+  for (const ack of acks) assert.equal(ack.success, true, ack.error);
+  assert.equal(t.world.reads().length, 1, 'one read shared by the scene');
+  assert.equal(t.world.writes().length, 1, 'one write for the scene');
+  assert.ok(t.clock.elapsed - started < 4300);
+  assert.deepEqual(
+    [
+      f.state.fanSpeed,
+      f.state.fanDirection,
+      f.state.wind,
+      f.state.lightOn,
+      f.state.lightBrightness,
+    ],
+    [4, 'reverse', true, true, 30],
+  );
+  t.app.stop();
+});

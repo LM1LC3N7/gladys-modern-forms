@@ -124,6 +124,9 @@ export class App {
     this.guards = new Map();
     /** `${id}:${part}` -> the last write starting that part that left: { sentAt, answered }. */
     this.lastWrites = new Map();
+    /** address key -> { state, at, generation }: the last read applied there. */
+    this.lastRead = new Map();
+    this.probeTimer = undefined;
     this.seq = 0;
     this.generation = 0;
     this.started = false;
@@ -314,6 +317,8 @@ export class App {
     this.clearConfigTimer();
     this.stopLinks();
     this.publisher.stop();
+    if (this.probeTimer !== undefined) this.timers.clearTimeout(this.probeTimer);
+    this.probeTimer = undefined;
     for (const lane of this.lanes.values()) lane.close();
     this.lanes.clear();
   }
@@ -469,6 +474,7 @@ export class App {
       address: g.address,
       resends: g.resends,
       confirmed: g.confirmed,
+      left: g.left,
       ...(g.other !== undefined ? { other: g.other } : {}),
     }));
   }
@@ -680,7 +686,9 @@ export class App {
       },
     });
     const state = parseState(json);
-    this.applyAnswer(key, state, at);
+    if (this.applyAnswer(key, state, at, { judge: true })) {
+      this.lastRead.set(key, { state, at, generation: this.generation });
+    }
     return { state, at };
   }
 
@@ -691,7 +699,7 @@ export class App {
    * `at`: which fan is there, its states, the guards checked. An answer whose request left
    * before the last one applied there is dropped (applied in the order they left).
    */
-  applyAnswer(key, state, at, { checkGuards = true } = {}) {
+  applyAnswer(key, state, at, { judge = false } = {}) {
     const last = this.seen.get(key);
     if (last && !(at > last.at)) return false;
     this.seen.set(key, { id: state.id, at });
@@ -708,7 +716,8 @@ export class App {
       }
     }
     this.fans.set(state.id, fan);
-    if (checkGuards) {
+    // Only a read judges the guards: the answer of a write (another part, a command) never does.
+    if (judge) {
       for (const part of Object.values(PARTS)) {
         const guard = this.guards.get(gkOf(state.id, part));
         if (!guard) continue;
@@ -755,7 +764,17 @@ export class App {
   // --- Guards (the Offs held) -------------------------------------------------------
 
   makeGuard(
-    { id, part, address, resends = 0, confirmed = false, other, seq = 0, inFlight = false },
+    {
+      id,
+      part,
+      address,
+      resends = 0,
+      confirmed = false,
+      other,
+      seq = 0,
+      inFlight = false,
+      left = false,
+    },
     mono = this.monotonic(),
   ) {
     return {
@@ -766,6 +785,9 @@ export class App {
       confirmed,
       other,
       seq,
+      // Ever left (the first send is not a resend); its last send left without an answer.
+      left,
+      unanswered: false,
       sentAt: -Infinity,
       inFlight,
       userInFlight: inFlight,
@@ -812,7 +834,41 @@ export class App {
       this.saveSoon();
       return;
     }
-    if (guard.resends < TIMINGS.resendMax) this.resendGuard(guard);
+    // One resend per read interval at most: never a burst of the 3 within a few reads.
+    if (guard.resends < TIMINGS.resendMax && this.monotonic() - guard.sentAt >= this.interval) {
+      this.resendGuard(guard);
+    }
+  }
+
+  /** An Off held that never left, or whose last send got no answer: the probe sends it. */
+  pending(guard) {
+    return (
+      !guard.confirmed && (!guard.left || (guard.unanswered && guard.resends < TIMINGS.resendMax))
+    );
+  }
+
+  /**
+   * The probe of the Offs held not yet answered: every TIMINGS.guardProbe, whatever the pause
+   * of the reads, one Off per address (the others of that address right behind its answer).
+   * An Off waits no read after its fan comes back.
+   */
+  armProbe() {
+    if (this.probeTimer !== undefined || this.stopped) return;
+    if (![...this.guards.values()].some((g) => this.pending(g))) return;
+    this.probeTimer = this.timers.setTimeout(() => {
+      this.probeTimer = undefined;
+      this.probe();
+    }, TIMINGS.guardProbe);
+  }
+
+  probe() {
+    const sent = new Set();
+    for (const guard of this.guards.values()) {
+      if (!this.pending(guard) || guard.inFlight || sent.has(guard.address)) continue;
+      sent.add(guard.address);
+      this.resendGuard(guard);
+    }
+    this.armProbe();
   }
 
   /** At start (once): the guards of /data not seen applied, before the configuration and the first read. */
@@ -822,6 +878,7 @@ export class App {
     for (const guard of this.guards.values()) {
       if (!guard.confirmed && guard.resends < TIMINGS.resendMax) this.resendGuard(guard);
     }
+    this.armProbe();
   }
 
   /** Sends a guard again (no ack): counted when it leaves; cut before its first byte, sent right behind. */
@@ -845,20 +902,34 @@ export class App {
           if (this.provenOther(key, guard.id)) throw new FanError('late', 'another fan');
         },
         onSent: () => {
-          guard.resends += 1;
+          // Counted once it has left; the first send that ever left is not a resend.
+          if (guard.left) guard.resends += 1;
+          guard.left = true;
           at = this.monotonic();
           guard.sentAt = at;
         },
       })
       .then((json) => {
+        guard.unanswered = false;
         const state = parseState(json);
+        // Its own answer judges this guard only (never the guard of the other part).
         this.applyAnswer(key, state, at);
         if (state.id === guard.id && partOn(state, guard.part) === false) {
           guard.confirmed = true;
           guard.other = undefined;
         }
+        // The fan answers again: the other Offs held for it go now.
+        for (const other of this.guards.values()) {
+          if (other !== guard && other.address === key && this.pending(other)) {
+            this.resendGuard(other);
+          }
+        }
       })
       .catch((err) => {
+        if (err instanceof FanError && err.sent) {
+          // A refusal (429, 5xx) or no answer: the probe sends it again.
+          guard.unanswered = true;
+        }
         again = err instanceof FanError && err.code === 'cut' && !err.sent;
         this.logger.warn(
           `modern-forms: Off of ${shortId(guard.id)} sent again: ${errorReason(err)}`,
@@ -871,6 +942,7 @@ export class App {
           return;
         }
         this.saveSoon();
+        this.armProbe();
         this.refreshStatus().catch(() => {});
       });
   }
@@ -962,6 +1034,12 @@ export class App {
 
   /** A read that leaves after `after` (shared by the commands waiting for one), at command priority. */
   freshRead(link, after, deadline) {
+    // A read already answered that left after the command arrived: shared (a scene on one fan
+    // is one read, then its writes).
+    const last = this.lastRead.get(link.key);
+    if (last && last.generation === this.generation && last.at > after) {
+      return Promise.resolve({ state: last.state, at: last.at });
+    }
     const job = link.fresh;
     if (job && job.generation === this.generation && (!job.started || job.sentAt > after)) {
       return job.promise;
@@ -980,7 +1058,34 @@ export class App {
     return next.promise;
   }
 
-  /** A non-protective command in its turn: the fan read (its identity), then the write. */
+  /** The fan read shows the fan of the command, with the part it drives. */
+  checkTarget(job, state, link) {
+    if (state.id !== job.id) {
+      throw this.refusal(state.id ? ERRORS.otherFan(link.key) : ERRORS.noIdentity(link.key));
+    }
+    if (
+      (job.part === PARTS.LIGHT && !state.light.present) ||
+      (job.key === F.WIND && !state.fan.hasWind)
+    ) {
+      throw this.refusal(ERRORS.notSupported);
+    }
+  }
+
+  /** What the answer of a write says to one command of it: undefined (done) or the error. */
+  outcomeOf(job, state, key) {
+    if (state.id !== job.id) {
+      return this.refusal(state.id ? ERRORS.answeredByOther(key) : ERRORS.unconfirmed);
+    }
+    const done = shows(state, job.body);
+    if (done === true) return undefined;
+    return this.refusal(done === false ? ERRORS.notApplied : ERRORS.unconfirmed);
+  }
+
+  /**
+   * A non-protective command in its turn: the fan read (its identity), then the write. The
+   * commands of the same fan waiting that this read serves (they arrived before it left) go in
+   * the same write, each field once: a scene on one slow fan is one read and one write.
+   */
   async command(link, job) {
     this.checkBeforeSend(job, link);
     let read;
@@ -993,20 +1098,44 @@ export class App {
       throw this.commandError(err, false, job.ahead);
     }
     this.checkBeforeSend(job, link);
-    if (read.state.id !== job.id) {
-      throw this.refusal(read.state.id ? ERRORS.otherFan(link.key) : ERRORS.noIdentity(link.key));
+    this.checkTarget(job, read.state, link);
+    const batch = [job];
+    const fields = new Map(Object.entries(job.body));
+    for (const other of [...link.commands]) {
+      if (other.id !== job.id || !(read.at > other.received)) continue;
+      // Each field once (the same value asked twice is one field: light on + brightness).
+      if (Object.entries(other.body).some(([k, v]) => fields.has(k) && fields.get(k) !== v)) {
+        continue;
+      }
+      link.commands.splice(link.commands.indexOf(other), 1);
+      try {
+        this.checkBeforeSend(other, link);
+        this.checkTarget(other, read.state, link);
+      } catch (err) {
+        other.reject(err);
+        continue;
+      }
+      batch.push(other);
+      for (const [k, v] of Object.entries(other.body)) fields.set(k, v);
     }
-    if (
-      (job.part === PARTS.LIGHT && !read.state.light.present) ||
-      (job.key === F.WIND && !read.state.fan.hasWind)
-    ) {
-      throw this.refusal(ERRORS.notSupported);
+    const others = batch.slice(1);
+    const settle = (outcomes) => {
+      for (const [i, other] of others.entries()) {
+        if (outcomes[i]) other.reject(outcomes[i]);
+        else other.resolve(undefined);
+      }
+    };
+    const body = Object.assign({}, ...batch.map((j) => j.body));
+    if (!validBody(body)) {
+      settle(others.map(() => this.refusal(ERRORS.badValue)));
+      throw this.refusal(ERRORS.badValue);
     }
-    const body = job.body;
-    if (!validBody(body)) throw this.refusal(ERRORS.badValue);
-    const gk = gkOf(job.id, job.part);
-    const guard = this.guards.get(gk);
-    const record = { sentAt: undefined, answered: false };
+    const starting = batch
+      .filter((j) => starts(j.body))
+      .map((j) => {
+        const gk = gkOf(j.id, j.part);
+        return { gk, guard: this.guards.get(gk), record: { sentAt: undefined, answered: false } };
+      });
     let left = false;
     let at;
     let json;
@@ -1014,14 +1143,14 @@ export class App {
       json = await this.laneOf(link.key).write(body, PRIORITY.COMMAND, {
         deadline: job.received + TIMINGS.commandAnswerBy,
         beforeSend: () => {
-          this.checkBeforeSend(job, link);
+          for (const j of batch) this.checkBeforeSend(j, link);
           if (this.provenOther(link.key, job.id)) throw this.refusal(ERRORS.otherFan(link.key));
           if (!validBody(body)) throw this.refusal(ERRORS.badValue);
         },
         onSent: () => {
           left = true;
           at = this.monotonic();
-          if (starts(body)) {
+          for (const { gk, guard, record } of starting) {
             record.sentAt = at;
             this.lastWrites.set(gk, record);
             // A newer command starting the part that left: the Off held for it ends here.
@@ -1035,28 +1164,29 @@ export class App {
     } catch (err) {
       const answered =
         err instanceof FanError && ['busy', 'http', 'bad_response', 'size'].includes(err.code);
-      record.answered = answered;
-      if (left && answered && guard && !this.guards.has(gk)) {
-        // Refused by the fan: not a newer command, the Off stands.
-        this.guards.set(gk, guard);
-        this.saveSoon();
+      for (const { gk, guard, record } of starting) {
+        record.answered = answered;
+        if (left && answered && guard && !this.guards.has(gk)) {
+          // Refused by the fan: not a newer command, the Off stands.
+          this.guards.set(gk, guard);
+          this.saveSoon();
+        }
       }
       if (err instanceof FanError && err.code === 'busy') this.failed(link.key, err);
       if (left) this.afterWrite(link.key);
-      throw this.commandError(err, left, job.ahead);
+      const error = this.commandError(err, left, job.ahead);
+      settle(others.map(() => error));
+      throw error;
     }
-    record.answered = true;
+    for (const { record } of starting) record.answered = true;
     const state = parseState(json);
     this.applyAnswer(link.key, state, at);
     this.afterWrite(link.key);
     this.flush().catch(() => {});
-    if (state.id !== job.id) {
-      if (state.id) throw this.refusal(ERRORS.answeredByOther(link.key));
-      throw this.refusal(ERRORS.unconfirmed);
-    }
-    const done = shows(state, body);
-    if (done === true) return undefined;
-    throw this.refusal(done === false ? ERRORS.notApplied : ERRORS.unconfirmed);
+    settle(others.map((j) => this.outcomeOf(j, state, link.key)));
+    const outcome = this.outcomeOf(job, state, link.key);
+    if (outcome) throw outcome;
+    return undefined;
   }
 
   /** The error of a write: never "not sent" once it may have left. */
@@ -1138,6 +1268,7 @@ export class App {
           },
           onSent: () => {
             left = true;
+            guard.left = true;
             guard.sentAt = this.monotonic();
           },
         });
@@ -1170,14 +1301,19 @@ export class App {
         this.saveSoon();
         throw this.refusal(ERRORS.otherFan(key));
       }
-      // Never abandoned: kept, sent again as soon as the lane is free and by the reads.
+      // Never abandoned: kept, sent again as soon as the lane is free, by the probe (every
+      // 10 s, whatever the pause of the reads) and by the reads.
       this.resendGuard(guard, PRIORITY.PROTECTIVE);
+      this.armProbe();
       this.refreshStatus().catch(() => {});
       throw this.refusal(ERRORS.protectiveKept(reasonOf(lastError)));
     }
     this.afterWrite(key);
     if (lastError) {
       if (lastError instanceof FanError && lastError.code === 'busy') this.failed(key, lastError);
+      // Left, but refused or not answered: the probe sends it again.
+      guard.unanswered = true;
+      this.armProbe();
       this.saveSoon();
       throw this.refusal(ERRORS.offUnconfirmed);
     }
@@ -1185,6 +1321,8 @@ export class App {
     this.applyAnswer(key, state, guard.sentAt);
     this.flush().catch(() => {});
     if (state.id && state.id !== id) {
+      // Another fan answered (swapped at that address, not seen yet): nothing held for it.
+      if (this.guards.get(gk) === guard) this.guards.delete(gk);
       this.saveSoon();
       throw this.refusal(ERRORS.answeredByOther(key));
     }

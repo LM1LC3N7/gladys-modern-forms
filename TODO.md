@@ -11,7 +11,19 @@ to date at the end of every milestone.
       `clientId`; Discover; "Test the connection"; fr/en docs. Tested against
       fake fans on a virtual clock (built from the WAC reference and the mock
       fan of aiomodernforms) and a real local HTTP server on a real clock (x20).
-- [ ] **Review** (high), then release.
+- [x] **Review r1** (2026-10-31): REFUSÉ (4 importants, 6 mineurs); fixed: the
+      probe of the Offs held (I1), the guard mutants (I2), a scene on one fan
+      written at once (I3), each Off judged by the reads only, one resend per
+      interval (I4), the temporary file of /data (m2), the 1 s cut of a frozen
+      Off armed on the request running (m6), the Off after a swap not seen (m1,
+      docs).
+- [ ] **Next patch** (review r1 minors left): m3, a light detected from
+      `lightOn` in the state (the WAC generation 3 example has `lightType: ""`
+      with `lightOn`): use an empty `lightType` as a sign of no light kit once a
+      real fan shows it; m4, `lightOn` + `lightBrightness` in one request (the
+      flash of aiomodernforms issue #99: brightness first); m5, the follow-up
+      reads (5 s, 20 s) not grouped: one pair per address, not per write.
+- [ ] **Review** r2 (high), then release.
 - [ ] **Milestone 2**: generation 4 (`/device` + `/fixture`, several light
       fixtures, color temperature), sleep timers, mDNS discovery
       (`_easylink._tcp`, `scanNetwork('mdns')`), Wi-Fi signal (`/config-read`).
@@ -61,6 +73,18 @@ to date at the end of every milestone.
   fan at an address of the configuration; the answer of the write is checked
   again. An answer without a valid `clientId` publishes nothing and is no
   proof of another fan.
+- **Probe of the Offs held**: an Off that never left, or whose last send was
+  refused (429, 5xx) or got no answer, is sent again every 10 s whatever the
+  pause of the reads (one per address, the others of that address right behind
+  its answer); the first send that ever leaves is no resend (`left`, in /data).
+- **Only the reads judge an Off**, each on its own field (the answer of a write,
+  of the other part or of a command, never does: review r1, I4, 3 resends
+  burnt in 114 ms); one resend per read interval at most.
+- **A scene on one fan**: the commands waiting that one read serves (they came
+  before it left) are written together, each field once (the same value asked
+  twice is one field), so 5 functions on a fan answering in 900 ms take one
+  read and one write; each is judged on its own fields of the answer. A finished
+  read that left after a command serves it too.
 - **Offs** (fan speed 0, light 0, brightness 0): go to the address the fan was
   last read at in this session, else in this process, else in `/data`, else
   the `address` param of the device (upserted by Discover), else the only

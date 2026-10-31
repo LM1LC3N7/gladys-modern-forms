@@ -93,6 +93,7 @@ test('normalizeMemory: only valid entries; future dates dropped; pauses capped; 
       address: '192.168.1.60:80',
       resends: 0,
       confirmed: false,
+      left: false,
       other: undefined,
     },
   ]);
@@ -118,4 +119,53 @@ test('a save that hangs never blocks the next one (its own temporary file)', asy
   store.save({ n: 1 });
   await store.save({ n: 2 });
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { n: 2 });
+});
+
+test('m2: a FIFO or a link left as the temporary file never blocks nor redirects a save', async (t) => {
+  const dir = await folder(t);
+  const path = join(dir, 's.json');
+  execFileSync('mkfifo', [`${path}.tmp`]);
+  const store = fileStore(path);
+  await store.save({ n: 1 });
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { n: 1 });
+  await writeFile(join(dir, 'victim'), 'keep');
+  await symlink(join(dir, 'victim'), `${path}.tmp`);
+  await store.save({ n: 2 });
+  assert.equal(await readFile(join(dir, 'victim'), 'utf8'), 'keep');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { n: 2 });
+});
+
+test('m2: an older save that ends after a newer one never puts its state back', async (t) => {
+  const dir = await folder(t);
+  const path = join(dir, 's.json');
+  const fs = await import('node:fs/promises');
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  const slow = {
+    ...fs,
+    open: async (...args) => {
+      const file = await fs.open(...args);
+      if (!first) return file;
+      first = false;
+      return {
+        ...file,
+        writeFile: async (...w) => {
+          await gate;
+          return file.writeFile(...w);
+        },
+        sync: () => file.sync(),
+        close: () => file.close(),
+      };
+    },
+  };
+  const store = fileStore(path, { fs: slow, queueWait: 20 });
+  const old = store.save({ n: 1 });
+  await store.save({ n: 2 });
+  await store.save({ n: 3 });
+  release();
+  await old;
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { n: 3 });
 });

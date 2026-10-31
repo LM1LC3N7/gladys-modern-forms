@@ -157,6 +157,18 @@ test('commands: Offs are protective; values bounded; the body checked again befo
   assert.equal(validBody({ fanOn: 'true' }), false);
   assert.equal(validBody({}), false);
   assert.equal(validBody({ fanOn: true, fanSpeed: 6 }), true);
+  assert.equal(
+    validBody({
+      fanOn: true,
+      fanSpeed: 6,
+      fanDirection: 'forward',
+      wind: true,
+      lightOn: true,
+      lightBrightness: 5,
+    }),
+    true,
+  );
+  assert.equal(validBody({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7 }), false);
 });
 
 test('shows: true, false, or unknown when a field is missing', () => {

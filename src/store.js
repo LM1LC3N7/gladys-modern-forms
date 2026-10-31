@@ -41,6 +41,7 @@ export function fileStore(
   let count = 0;
   let placed = 0;
   let sharedBusy = false;
+  let renames = Promise.resolve();
   return {
     /** null when there is no file (a fresh install); throws when it cannot be read or parsed. */
     async load() {
@@ -83,19 +84,25 @@ export function fileStore(
         if (shared) sharedBusy = true;
         const temporary = shared ? `${path}.tmp` : `${path}.tmp-${seq}`;
         try {
-          const file = await fs.open(temporary, 'w', 0o600);
+          const file = await openTemporary(fs, temporary);
           try {
             await file.writeFile(text, 'utf8');
             await file.sync();
           } finally {
             await file.close();
           }
-          if (seq < placed) {
-            await fs.unlink(temporary).catch(() => {});
-            return;
-          }
-          await fs.rename(temporary, path);
-          placed = Math.max(placed, seq);
+          // The renames one after the other, in order: an older write never lands after a newer
+          // one is in place (it drops its file instead).
+          const step = renames.then(async () => {
+            if (seq < placed) {
+              await fs.unlink(temporary).catch(() => {});
+              return;
+            }
+            await fs.rename(temporary, path);
+            placed = seq;
+          });
+          renames = step.catch(() => {});
+          await step;
         } finally {
           if (shared) sharedBusy = false;
         }
@@ -104,6 +111,26 @@ export function fileStore(
       return write;
     },
   };
+}
+
+/**
+ * The temporary file, created anew: never through a link, never blocking on a FIFO or a
+ * device left there (O_EXCL | O_NOFOLLOW | O_NONBLOCK); whatever was there is removed first.
+ */
+async function openTemporary(fs, temporary) {
+  const flags =
+    constants.O_WRONLY |
+    constants.O_CREAT |
+    constants.O_EXCL |
+    constants.O_NOFOLLOW |
+    constants.O_NONBLOCK;
+  try {
+    return await fs.open(temporary, flags, 0o600);
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    await fs.unlink(temporary);
+    return fs.open(temporary, flags, 0o600);
+  }
 }
 
 /** The same in memory (tests). `fail`: the next saves throw; `unreadable`: load throws; `hang`: never answers. */
@@ -142,6 +169,8 @@ function guardOf(raw) {
     address: raw.address,
     resends: Number.isInteger(raw.resends) ? Math.min(Math.max(raw.resends, 0), 99) : 0,
     confirmed: raw.confirmed === true,
+    // Unreadable: never left (its first send is then not counted as a resend).
+    left: raw.left === true,
     other: typeof raw.other === 'boolean' ? raw.other : undefined,
   };
 }
